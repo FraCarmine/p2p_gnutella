@@ -49,14 +49,17 @@ void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
 // Funzione di utilità per leggere un intero da stdin in modo sicuro
 int leggiIntero(const char* prompt, int min, int max) {
     char buffer[64];
-    int n;
+    int n, ret;
     while (1) {
         printf("%s", prompt);
         if (!fgets(buffer, sizeof(buffer), stdin)) {
             printf("Errore o EOF su input.\n");
-            return min-1; // valore impossibile
+            return min-1;
         }
-        if (sscanf(buffer, "%d", &n) == 1 && n >= min && n <= max) {
+        // Se l'utente preme solo invio, ripeti
+        if (buffer[0] == '\n') continue;
+        ret = sscanf(buffer, "%d", &n);
+        if (ret == 1 && n >= min && n <= max) {
             return n;
         }
         printf("Valore non valido. Deve essere compreso tra %d e %d.\n", min, max);
