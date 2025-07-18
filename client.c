@@ -215,10 +215,11 @@ int main() {
                         printf("Nuova connessione da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
                         break; // esce dal ciclo dopo aver accettato una connessione
                     }
+                    if(i == MAXINCOMING-1) {//tutti gli slot sono occupati
+                     printf("Massimo numero di peer in arrivo raggiunto.\n");
                 }
-                if(i == MAXINCOMING) {//tutti gli slot sono occupati
-                    printf("Massimo numero di peer in arrivo raggiunto.\n");
                 }
+                
             }
 
             //controllo se ci sono peer in uscita pronti
@@ -231,7 +232,7 @@ int main() {
             //controllo se ci sono peer in arrivo pronti
             for(int i = 0; i < MAXINCOMING; i++) {
                 if(incoming_peers[i].active && FD_ISSET(incoming_peers[i].sd, &temp)) {
-                    //@TODO: gestire i peer in arrivo
+                    //@TODo: gestire i peer in arrivo
                 }
             }
         }
