@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #define MAXLEN 255
 #define MAXOUTGOING 3
@@ -22,8 +23,8 @@
 //#define  PORT 3333
 
 typedef struct RoutingEntry {
-    char id[16];
-    int sockfd; // -1 se sono io il mittente originale
+    int id;
+    int sockfd; // -1 se sono io il mittente originale 0 se il socket è libero
 } RoutingEntry;
 
 typedef struct Peer {
@@ -34,8 +35,8 @@ typedef struct Peer {
 
 typedef struct MessageHeader {
     int type; // 1 per ping, 2 per query, 3 pong, 4 queryhit
-    char id[16]; // ID univoco (puoi usare 16 byte random)
-    int ttl;
+    int id; // ID univoco numerico
+    int ttl; // Time To Live
     int payload_length; // lunghezza del payload
 } MessageHeader;
 
@@ -57,6 +58,8 @@ int main() {
     int scelta;
     int flag = 1;
     int n; //variabile per il numero di descrittori pronti
+    RoutingEntry routingTable[MAXMESSAGE]; //tabella di routing per i messaggi
+    srand(time(NULL)); // inizializza il generatore di numeri casuali UNA SOLA VOLTA
 
 
  	//parto con la listen
@@ -136,21 +139,20 @@ int main() {
         printf("Errore nella connessione al peer well known");
     }
     
-    
+    //menu utente testuale
+    printf("\n\nMenu:\n 1. Esegui un ping \n  2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
+
+
 
     // Ciclo principale per gestire le connessioni e le comunicazioni
     while (flag){
-
-        //menu utente testuale
-        printf("\n\nMenu:\n 1. Esegui un ping \n  2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
-
-
         memcpy(&temp, &readFDSET, sizeof(temp)); //copio il set di lettura per la select dentro temp che verra modificato da select
         n= select(maxfd+1, &temp, NULL, NULL, &time); //attendo eventi sui socket
         
         if(n>0){    //almeno un socket è pronto
             printf("\n%d socket pronti\n", n);
 
+            
             if(FD_ISSET(STDIN_FILENO, &temp)){  //è Pronto lo stdin
                 scanf("%d", &scelta);
                 while(getchar() !='\n'); //pulisco il buffer
@@ -193,6 +195,8 @@ int main() {
                         close(listenSocket); //chiude il socket di ascolto
                         break;
                 }  
+                
+
             }
             if(!flag){
                 break; //esce dal ciclo principale se l'utente ha scelto di uscire
@@ -235,6 +239,8 @@ int main() {
                     //@TODo: gestire i peer in arrivo
                 }
             }
+            //menu utente testuale
+            printf("\n\nMenu:\n 1. Esegui un ping \n 2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
         }
     }
 
@@ -329,6 +335,51 @@ int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET)
     }
     return 1;
 }
+
+
+int ping(Peer* outgoing_peers, Peer*incoming_peers, RoutingEntry* routingTable) {
+    // Funzione per inviare un ping a un peer
+    int i,j,count = 0;
+    MessageHeader header;
+    header.type = TYPE_PING;
+    header.payload_length = htons(0); // nessun payload per il ping
+    header.ttl = htons(10); // Time To Live in network byte order
+    header.id = htons(rand()); // genera ID numerico random
+
+    //controllo di avere spazio nella tabella di routing
+    for (j = 0; j < MAXMESSAGE; j++){
+        if(routingTable[j].sockfd == 0) { // se il socket è libero
+            break; // esce dal ciclo dopo aver trovato uno slot libero
+        }
+    }
+    if(j == MAXMESSAGE) {
+        printf("Tabella di routing piena, impossibile inviare ping.\n");
+        return -1; // tabella di routing piena
+    }
+
+    for(i = 0; i < MAXOUTGOING; i++) {
+        if(outgoing_peers[i].active) {
+            count++; // conta i peer attivi
+            // Preparo l'header del messaggio di ping
+            send(outgoing_peers[i].sd, &header, sizeof(header), 0); // invio il ping al peer
+        }
+    }
+    for(i = 0; i < MAXINCOMING; i++) {
+        if(incoming_peers[i].active) {
+            count++; // conta i peer attivi
+            send(incoming_peers[i].sd, &header, sizeof(header), 0); // invio il ping al peer
+        }
+    }
+    
+    if(count != 0) {           
+        routingTable[j].sockfd = -1; // inizializza il socket a -1
+        routingTable[j].id= ntohs(header.id); // memorizza l'ID del messaggio      
+    } 
+    return count; // ritorna il numero di peer attivi
+}
+
+
+
 
 void die(char *error) {
 	
