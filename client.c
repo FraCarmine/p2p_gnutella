@@ -46,6 +46,23 @@ void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
 
 
 
+// Funzione di utilità per leggere un intero da stdin in modo sicuro
+int leggiIntero(const char* prompt, int min, int max) {
+    char buffer[64];
+    int n;
+    while (1) {
+        printf("%s", prompt);
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            printf("Errore o EOF su input.\n");
+            return min-1; // valore impossibile
+        }
+        if (sscanf(buffer, "%d", &n) == 1 && n >= min && n <= max) {
+            return n;
+        }
+        printf("Valore non valido. Deve essere compreso tra %d e %d.\n", min, max);
+    }
+}
+
 int main() {
 	int listenSocket;//socket dal quale ascolto chi si vuole connettere con me
     int newsd; //socket per la nuova connessione
@@ -80,14 +97,8 @@ int main() {
         die("error soREuseADDR \n");
     }
     printf("inserire porta in ascolto\n");
-    scanf("%d", &listenPort);
-    while(getchar() !='\n');    //pulisco il buffer
-    while (listenPort < 1024 || listenPort > 65535) {
-        printf("Porta non valida. Deve essere compresa tra 1024 e 65535.\n");
-        printf("inserire porta in ascolto\n");
-        scanf("%d", &listenPort);
-        while(getchar() !='\n'); // pulisco il buffer
-    }
+    listenPort = leggiIntero("Porta: ", 1024, 65535);
+    if (listenPort < 1024) die("Errore nella lettura della porta di ascolto");
 
     //binding
     bind_ip_port.sin_family = AF_INET; //IPV4
@@ -150,10 +161,12 @@ int main() {
         
         if(n>0){    //almeno un socket è pronto
             printf("\n%d socket pronti\n", n);
-
             if(FD_ISSET(STDIN_FILENO, &temp)){  //è Pronto lo stdin
-                scanf("%d", &scelta);
-                while(getchar() !='\n'); //pulisco il buffer
+                scelta = leggiIntero("Scelta: ", 1, 5);
+                if (scelta < 1) {
+                    printf("Input non valido o EOF.\n");
+                    continue;
+                }
 
                 switch (scelta) {
                     case 1: //fa il ping
@@ -285,14 +298,10 @@ int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET)
     int port, i;
     struct sockaddr_in peer_addr;
     // Chiede all'utente di inserire la porta del peer
-    printf("inserire porta del peer\n");
-    scanf("%d", &port);
-    while(getchar() !='\n'); // pulisco il buffer
-    while(port < 1024 || port > 65535) {
-        printf("Porta non valida. Deve essere compresa tra 1024 e 65535.\n");
-        printf("inserire porta del peer\n");
-        scanf("%d", &port);
-        while(getchar() !='\n'); // pulisco il buffer
+    port = leggiIntero("inserire porta del peer\nPorta: ", 1024, 65535);
+    if (port < 1024) {
+        printf("Errore nella lettura della porta del peer.\n");
+        return -1;
     }
 
     // Creazione del socket per il peer
