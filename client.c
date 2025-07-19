@@ -906,7 +906,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     query_hit_payload queryHitPayload;
     int s;
 
-    if(nths(header->type) != TYPE_QUERYHIT) {
+    if(ntohs(header->type) != TYPE_QUERYHIT) {
         printf("Ricevuto un messaggio non di tipo QUERY_HIT.\n");
         return -1; // non è un QUERY_HIT
     }
