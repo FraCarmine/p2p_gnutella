@@ -301,7 +301,7 @@ int main() {
 
 int riceviMessaggio(int sd, MessageHeader* header) {
     // Funzione per ricevere un messaggio da un peer
-    int s
+    int s;
     s=recv(sd, header, sizeof(MessageHeader), 0);
     if(s == 0) {
         printf("connessione chiusa dal peer.\n");
@@ -446,7 +446,7 @@ int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable) {
 }
 
 
-int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, sockaddr_in peer_addr) {
+int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, struct sockaddr_in peer_addr) {
     // Funzione per rispondere a un ping
     MessageHeader responseHeader;
     PongPayload pongPayload;
