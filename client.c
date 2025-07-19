@@ -322,11 +322,17 @@ int main() {
                             case TYPE_QUERY:
                                 printf("Ricevuto query da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
                                 //inoltro la query a tutti i peer
-                                handleQuery(outgoing_peers[i].sd, &header, outgoing_peers, incoming_peers, routingTable);
+                                handleQuery(outgoing_peers[i].sd, &header, outgoing_peers, incoming_peers, routingTable, mySpeed, bind_ip_port, listenPort, fs);
                                 break;
                             
                             case TYPE_QUERYHIT:
-                                //@todo
+                                printf("Ricevuto queryhit da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
+                                // Gestisco il queryhit
+                                if(handleQueryHit(outgoing_peers[i].sd, &header, routingTable)<0){
+                                    perror("Errore nella gestione del queryhit");
+                                } else {
+                                    printf("Queryhit gestito con successo.\n");
+                                }
                                 break;
                         }
                     }
@@ -366,11 +372,19 @@ int main() {
                                 break;
 
                             case TYPE_QUERY:
-                                //@todo
+                                printf("Ricevuto query da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
+                                //inoltro la query a tutti i peer
+                                handleQuery(incoming_peers[i].sd, &header, outgoing_peers, incoming_peers, routingTable, mySpeed, bind_ip_port, listenPort, fs);
                                 break;
                             
                             case TYPE_QUERYHIT:
-                                //@todo
+                                printf("Ricevuto queryhit da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
+                                // Gestisco il queryhit
+                                if(handleQueryHit(incoming_peers[i].sd, &header, routingTable)<0){
+                                    perror("Errore nella gestione del queryhit");
+                                } else {
+                                    printf("Queryhit gestito con successo.\n");
+                                }
                                 break;
                         }
                     }
@@ -511,14 +525,13 @@ int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET)
 }
 
 
-int ricercaDuplicato(RoutingEntry* routingTable, int id, int sockfd) {
+int ricercaDuplicato(RoutingEntry* routingTable, int id) {
     // Funzione per cercare un duplicato nella tabella di routing
     for(int i = 0; i < MAXMESSAGE; i++) {
         if(routingTable[i].id == id) {
             return i; // trovato duplicato
         }
-    }
-    
+    }  
     return 0; // nessun duplicato trovato
 }
 
@@ -527,7 +540,7 @@ int ricercaDuplicato(RoutingEntry* routingTable, int id, int sockfd) {
 
 int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     PongPayload pongPayload;
-    int index = ricercaDuplicato(routingTable, ntohs(header->id), sd);
+    int index = ricercaDuplicato(routingTable, ntohs(header->id));
     if(index < 0) {
         printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
         return -1; // errore nella ricerca del duplicato
@@ -574,7 +587,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
         printf("Tabella di routing piena, impossibile rispondere al ping.\n");
         return -1; // tabella di routing piena
     }
-    if(ricercaDuplicato(routingTable, ntohs(header->id), sd)>0) {
+    if(ricercaDuplicato(routingTable, ntohs(header->id))>0) {
         printf("Trovato duplicato nella tabella di routing, non rispondo al ping.\n");
         return -1; // trovato duplicato
     }
@@ -772,7 +785,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         return -1; // non è una query
     }
 
-    int index = ricercaDuplicato(routingTable, ntohs(header->id), sd);
+    int index = ricercaDuplicato(routingTable, ntohs(header->id));
     if(index){
         printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
         return -1; // errore nella ricerca del duplicato
@@ -782,6 +795,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         perror("Errore nella ricezione del payload della query");
         return -1; // errore nella ricezione del payload della query
     }
+    //ricerco in locale
     if(queryPayload.minimum_speed <= mySpeed) {
         queryHitPayload.n_hits = 0;
         queryHitPayload.port = listenPort;
@@ -831,7 +845,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         }
     }
     if(k == MAXMESSAGE) {
-        printf("Tabella di routing piena, impossibile rispondere al query.\n");
+        printf("Tabella di routing piena, impossibile inoltrare query.\n");
         return -1; // tabella di routing piena
     }
 
@@ -842,8 +856,8 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         return 0; // TTL scaduto, non inoltro
     }
 
-    routingTable[index].sockfd = sd; // inizializza il socket a -1
-    routingTable[index].id = ntohs(header->id); // memorizza l'ID
+    routingTable[k].sockfd = sd; // segno quale socket ha inviato la query
+    routingTable[k].id = ntohs(header->id); // memorizza l'ID
     printf("Inoltro della query a tutti i peer attivi.\n");
     for(j = 0; j < MAXOUTGOING; j++) {
         if(outgoing_peers[j].active) {
@@ -883,6 +897,50 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
     }
 
     return count; // ritorna il numero di peer attivi
+}
+
+
+
+int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
+    // Funzione per gestire una risposta di tipo QUERY_HIT
+    query_hit_payload queryHitPayload;
+    int s;
+
+    if(header->type != TYPE_QUERYHIT) {
+        printf("Ricevuto un messaggio non di tipo QUERY_HIT.\n");
+        return -1; // non è un QUERY_HIT
+    }
+
+    if(recv(sd, &queryHitPayload, sizeof(query_hit_payload), 0) < 0) {
+        perror("Errore nella ricezione del payload di QUERY_HIT");
+        return -1; // errore nella ricezione del payload di QUERY_HIT
+    }
+
+    printf("Ricevuto QUERY_HIT con %d risultati:\n", ntohs(queryHitPayload.n_hits));
+    s=ricercaDuplicato(routingTable, ntohs(header->id));
+    if(s < 0) {
+        printf("Errore nella ricerca nella tabella di routing.\n");
+        return -1; // errore nella ricerca del duplicato
+    }
+    if(routingTable[s].sockfd == -1) {//sono io che ho fatto la query
+        printf("Ricevuto QUERY_HIT per la mia query  da %s:%d\n", queryHitPayload.ip, ntohs(queryHitPayload.port));
+        for(int i = 0; i < queryHitPayload.n_hits; i++) {
+            printf("Risultato %d: %s (indice: %d)\n", i + 1, queryHitPayload.results[i].name, queryHitPayload.results[i].index);
+        }
+        return 0; // gestione del QUERY_HIT completata con successo
+    }
+
+    //inoltro la queryHIT a colui che ha fatto la query
+    if(send(routingTable[s].sockfd, header, sizeof(MessageHeader), 0) < 0) {
+        perror("Errore nell'invio dell'header di QUERY_HIT al peer");
+        return -1; // errore nell'invio dell'header di QUERY_HIT
+    }
+    if(send(routingTable[s].sockfd, &queryHitPayload, sizeof(query_hit_payload), 0) < 0) {
+        perror("Errore nell'invio del payload di QUERY_HIT al peer");
+        return -1; // errore nell'invio del payload di QUERY_HIT
+    }    
+    printf("inoltrara query hit \n");
+    return 0; // gestione del QUERY_HIT completata con successo
 }
 
 
