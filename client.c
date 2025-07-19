@@ -385,7 +385,7 @@ int main() {
 
 //-------------------------------------------------------Utilities------------------------------------------------------------
  
-int popolafileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile) {
+int popolaFileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile) {
     // Funzione per popolare il file system con i file di esempio
     int len;
     printf("Popolamento del file system con %d file di esempio...\n", nmaxfile);
