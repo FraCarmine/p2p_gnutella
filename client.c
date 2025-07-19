@@ -40,6 +40,11 @@ typedef struct MessageHeader {
     int payload_length; // lunghezza del payload
 } MessageHeader;
 
+typedef struct PongPayload {
+    int port; // porta del peer
+    char ip[MAXLEN]; // indirizzo IP del peer
+} PongPayload;
+
 
 
 void die(char *);
@@ -59,6 +64,7 @@ int main() {
     int flag = 1;
     int n; //variabile per il numero di descrittori pronti
     int p;
+    MessageHeader header; //header del messaggio
     RoutingEntry routingTable[MAXMESSAGE]; //tabella di routing per i messaggi
     srand(time(NULL)); // inizializza il generatore di numeri casuali UNA SOLA VOLTA
 
@@ -238,7 +244,45 @@ int main() {
             //controllo se ci sono peer in uscita pronti
             for(int i = 0; i < MAXOUTGOING; i++) {
                 if(outgoing_peers[i].active && FD_ISSET(outgoing_peers[i].sd, &temp)) {
-                    //@TODO: gestire i peer in uscita
+                    // ricevo il messaggio dal peer in uscita
+                    p= riceviMessaggio(outgoing_peers[i].sd, &header);
+                    if(p == 0) {
+                        perror("Errore nella ricezione del messaggio dal peer in uscita");
+                        close(outgoing_peers[i].sd); // chiudo il socket del peer
+                        outgoing_peers[i].active = 0; // segna il peer come non attivo
+                        FD_CLR(outgoing_peers[i].sd, &readFDSET); // rimuovo il socket dal set di lettura
+                    } 
+                    if(p < 0) {
+                        printf("Errore nella ricezione del messaggio dal peer in uscita.\n");
+                        continue; // continua il ciclo se c'è un errore
+                    }
+                    else{
+                        // Gestisco il messaggio ricevuto
+                        switch(header.type) {
+                            case TYPE_PING:
+                                printf("Ricevuto ping da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
+                                // Rispondo con un pong
+                                if(rispondiPing(outgoing_peers[i].sd, routingTable, &header, outgoing_peers, incoming_peers, bind_ip_port) < 0) {
+                                    perror("Errore nella risposta al ping");
+                                } else {
+                                    printf("Pong inviato con successo.\n");
+
+                                }
+                                break;
+                            case TYPE_PONG:
+                                printf("Ricevuto pong da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
+                                handlePong(outgoing_peers[i].sd, &header, routingTable);
+                                break;
+
+                            case TYPE_QUERY:
+                                //@todo
+                                break;
+                            
+                            case TYPE_QUERYHIT:
+                                //@todo
+                                break;
+                        }
+                    }
                 }
             }
             
@@ -252,10 +296,24 @@ int main() {
             printf("\n\nMenu:\n 1. Esegui un ping \n 2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
         }
     }
-
-	
 }
 
+
+int riceviMessaggio(int sd, MessageHeader* header) {
+    // Funzione per ricevere un messaggio da un peer
+    int s
+    s=recv(sd, header, sizeof(MessageHeader), 0);
+    if(s == 0) {
+        printf("connessione chiusa dal peer.\n");
+        return 0; // connessione chiusa dal peer
+    }
+    if(s < 0) {
+        perror("Errore nella ricezione del messaggio");
+        return -1; // errore nella ricezione del messaggio
+    }
+
+    return 0; // messaggio ricevuto con successo
+    }
 
 
 void chiudiConnessioni(Peer* incoming_peers, Peer* outgoing_peers){
@@ -345,6 +403,121 @@ int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET)
     return 1;
 }
 
+
+int ricercaDuplicato(RoutingEntry* routingTable, int id, int sockfd) {
+    // Funzione per cercare un duplicato nella tabella di routing
+    for(int i = 0; i < MAXMESSAGE; i++) {
+        if(routingTable[i].id == id) {
+            return i; // trovato duplicato
+        }
+    }
+    return 0; // nessun duplicato trovato
+}
+
+int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable) {
+    PongPayload pongPayload;
+    int index = ricercaDuplicato(routingTable, ntohs(header->id), sd);
+    if(index < 0) {
+        printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
+        return -1; // errore nella ricerca del duplicato
+    }
+
+    int s = recv(sd, &pongPayload, sizeof(PongPayload), 0); 
+    if(s <= 0) {
+        perror("Errore nella ricezione del pong");
+        return -1; // errore nella ricezione del pong
+    }
+
+    if(routingTable[index].sockfd == -1) { //ho fatto io la ping questa è la risposta
+        printf("Client sulla rete ip:%s:%d ha risposto al mio ping con un pong.\n", pongPayload.ip, ntohs(pongPayload.port));
+        return 0; // non inoltro il pong, è una risposta al mio ping
+    }
+
+    if(send(routingTable[index].sockfd, header, sizeof(MessageHeader), 0) <0) {
+        perror("Errore nell'invio del pong al peer");
+        return -1; // errore nell'invio del pong
+
+    } // inoltro il pong al peer che ha inviato il ping
+    if(send(routingTable[index].sockfd, &pongPayload, sizeof(PongPayload), 0) < 0) {
+        perror("Errore nell'invio del payload del pong al peer");
+        return -1; // errore nell'invio del payload del pong
+    }
+    return 0; // pong gestito con successo    
+}
+
+
+int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, sockaddr_in peer_addr) {
+    // Funzione per rispondere a un ping
+    MessageHeader responseHeader;
+    PongPayload pongPayload;
+    int j;
+    if(header->type != TYPE_PING) {
+        return -1; // non è un ping
+    }
+    for(j = 0; j < MAXMESSAGE; j++) {
+        if(routingTable[j].sockfd== 0) {
+            break; // trovo il peer in uscita
+        }
+    }
+    if(j == MAXMESSAGE) {
+        printf("Tabella di routing piena, impossibile rispondere al ping.\n");
+        return -1; // tabella di routing piena
+    }
+    if(ricercaDuplicato(routingTable, ntohs(header->id), sd)>0) {
+        printf("Trovato duplicato nella tabella di routing, non rispondo al ping.\n");
+        return -1; // trovato duplicato
+    }
+
+
+    // Rispondo con un pong
+    responseHeader.type = TYPE_PONG;
+    responseHeader.payload_length = htons(sizeof(PongPayload)); // lunghezza del payload
+    responseHeader.ttl = htons(10); // Time To Live in network byte order
+    responseHeader.id = header->id; //rispondo con lo stesso ID del ping
+    pongPayload.port = peer_addr.sin_port; // mia porta di ascolto
+    strncpy(pongPayload.ip, LOCALHOST, MAXLEN); // indirizzo IP del peer perchè tanto è una demo basterebbe sostituire con l'ip reale della bind
+
+    if(send(sd, &responseHeader, sizeof(responseHeader), 0)<0){
+        perror("Errore nell'invio del pong al peer\n");
+        return -1; // errore nell'invio del pong
+    }
+    if(send(sd, &pongPayload, sizeof(pongPayload), 0) <0){
+        perror("Errore nell'invio del payload del pong al peer\n");
+        return -1; // errore nell'invio del payload del pong
+    }
+    // Aggiungo l'ID e il socket alla tabella di routing
+    routingTable[j].sockfd = sd; // memorizzo il socket
+    routingTable[j].id = header->id; // memorizzo l'ID del messaggio
+
+    //inoltro a tutti il ping
+    header->ttl = htons(ntohs(header->ttl) - 1); // decremento il TTL
+    if(ntohs(header->ttl) <= 0) {
+        printf("TTL scaduto per il ping, non inoltro.\n");
+        return 0; // TTL scaduto, non inoltro
+    }
+    //inoltro il ping a tutti i peer
+    for(int i = 0; i < MAXOUTGOING; i++) {
+        if(outgoing_peers[i].active) {
+            if(outgoing_peers[i].sd == sd) {
+                continue; // non inoltro a chi me lo ha inviato
+            }
+            if(send(outgoing_peers[i].sd, header, sizeof(MessageHeader), 0) < 0) {
+                perror("Errore nell'invio del ping al peer in uscita");
+            }
+        }
+    }
+    for(int i = 0; i < MAXINCOMING; i++) {
+        if(incoming_peers[i].active) {
+            if(incoming_peers[i].sd == sd) {
+                continue; // non inoltro a chi me lo ha inviato
+            }
+            if(send(incoming_peers[i].sd, header, sizeof(MessageHeader), 0) < 0) {
+                perror("Errore nell'invio del ping al peer in arrivo");
+            }
+        }
+    }
+    return 1; // risposta inviata con successo
+}
 
 int ping(Peer* outgoing_peers, Peer*incoming_peers, RoutingEntry* routingTable) {
     // Funzione per inviare un ping a un peer
