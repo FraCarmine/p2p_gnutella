@@ -199,7 +199,7 @@ int main() {
                     
                     case 2: //esegue una query
                         printf("Eseguo query...\n");
-                        p=eseguiQuery(outgoing_peers, incoming_peers, routingTable, mySpeed);
+                        p=query(outgoing_peers, incoming_peers, routingTable);
                         if(p < 0) {
                             printf("Errore nell'invio della query.\n");
                         } else {
