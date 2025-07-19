@@ -916,6 +916,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
         return -1; // errore nella ricezione del payload di QUERY_HIT
     }
 
+
     printf("Ricevuto QUERY_HIT con %d risultati:\n", ntohs(queryHitPayload.n_hits));
     s=ricercaDuplicato(routingTable, ntohs(header->id));
     if(s < 0) {
@@ -924,7 +925,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     }
     if(routingTable[s].sockfd == -1) {//sono io che ho fatto la query
         printf("Ricevuto QUERY_HIT per la mia query  da %s:%d\n", queryHitPayload.ip, ntohs(queryHitPayload.port));
-        for(int i = 0; i < queryHitPayload.n_hits; i++) {
+        for(int i = 0; i < ntohs(queryHitPayload.n_hits); i++) {
             printf("Risultato %d: %s (indice: %d)\n", i + 1, queryHitPayload.results[i].name, ntohs(queryHitPayload.results[i].index));
         }
         return 0; // gestione del QUERY_HIT completata con successo
