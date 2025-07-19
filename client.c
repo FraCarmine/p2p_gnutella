@@ -16,7 +16,9 @@
 #define TYPE_PONG 3
 #define TYPE_QUERYHIT 4
 #define MAXMESSAGE 100
-
+#define MAX_FILENAME 128 // lunghezza massima del nome del file
+#define MAX_RESULTS 3 // numero massimo di risultati per query
+#define NMAXFILE 10 // numero massimo di file per peer
 
 //#define  PORT 3333
 
@@ -51,8 +53,22 @@ typedef struct QueryPayload{
 } QueryPayload;
 
 
-//---------------------------------------------------------------------------------------------------------------------------------------------------
+typedef struct file_result {
+    int index;
+    char name[MAX_FILENAME];  // es. 128 byte
+} file_result;
 
+typedef struct query_hit_payload{
+    int n_hits;
+    int port;
+    char ip[MAXLEN]; // indirizzo IP del peer che ha risposto
+    int speed;
+    file_result results[MAX_RESULTS];  // es. massimo 10 file trovati
+} query_hit_payload;
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------
+//
 
 void die(char *);
 void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
@@ -61,7 +77,8 @@ int riceviMessaggio(int sd, MessageHeader* header);
 int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET);
 int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable);
 int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, struct sockaddr_in peer_addr);
-
+int ping(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
+int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 
 
 int main() {
@@ -77,6 +94,9 @@ int main() {
     int n; //variabile per il numero di descrittori pronti
     int p;
     int mySpeed = 100; // variabile per la velocità 100kbps
+    char fs[NMAXFILE][MAXLEN]; // stringa per il nome del file
+
+
     MessageHeader header; //header del messaggio
     RoutingEntry routingTable[MAXMESSAGE]; //tabella di routing per i messaggi
     srand(time(NULL)); // inizializza il generatore di numeri casuali UNA SOLA VOLTA
@@ -154,6 +174,7 @@ int main() {
     if(listenSocket > maxfd) {
         maxfd = listenSocket; // aggiorno il massimo descrittore di file
     }
+    popolaFileSystem(fs, NMAXFILE); //popolo il file system con i file di esempio
     //---------------------------------------------------------fine inizializzazione------------------------------------------------------------
 
     //
@@ -239,6 +260,7 @@ int main() {
                 break; //esce dal ciclo principale se l'utente ha scelto di uscire
             }
 
+            //----------------------------------------------------LISTEN SOCKET-------------------------------------------------
             //controllo se ci sono nuovi peer in arrivo da accettare
             if(FD_ISSET(listenSocket, &temp)) {
                 for(int i = 0; i < MAXINCOMING; i++) {
@@ -298,7 +320,9 @@ int main() {
                                 break;
 
                             case TYPE_QUERY:
-                                //@todo
+                                printf("Ricevuto query da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
+                                //inoltro la query a tutti i peer
+                                handleQuery(outgoing_peers[i].sd, &header, outgoing_peers, incoming_peers, routingTable);
                                 break;
                             
                             case TYPE_QUERYHIT:
@@ -361,6 +385,27 @@ int main() {
 
 //-------------------------------------------------------Utilities------------------------------------------------------------
  
+int popolafileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile) {
+    // Funzione per popolare il file system con i file di esempio
+    int len;
+    printf("Popolamento del file system con %d file di esempio...\n", nmaxfile);
+    for(int i = 0; i < nmaxfile; i++) {
+        printf("\ninserire nome del file:  ");
+        if (fgets(fs[i], MAXLEN, stdin) != NULL) {
+            int len = strlen(fs[i]);
+            if (len > 0 && fs[i][len - 1] == '\n') {
+                fs[i][len - 1] = '\0'; // metto il terminatore di stringa al posto del a capo
+            }
+            else{
+                fs[i][0] = '\0';
+            }
+        } 
+    }
+    return 0; // ritorna 0 se tutto va bene
+}
+
+
+
 int riceviMessaggio(int sd, MessageHeader* header) {
     // Funzione per ricevere un messaggio da un peer
     int s;
@@ -522,7 +567,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
     }
     for(j = 0; j < MAXMESSAGE; j++) {
         if(routingTable[j].sockfd== 0) {
-            break; // trovo il peer in uscita
+            break; // trovo il primo slot libero nella tabella di routing
         }
     }
     if(j == MAXMESSAGE) {
@@ -673,6 +718,7 @@ int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable
     header.payload_length = htons(sizeof(QueryPayload)); // lunghezza del payload
     header.ttl = htons(10); // Time To Live in network byte order
     header.id = htons(rand()); // genera ID numerico random 
+    queryPayload.minimum_speed = htons(queryPayload.minimum_speed); // converto la velocità minima in network byte order
 
     //inoltro la query a tutti i peer connessi a me
     for(i = 0; i < MAXOUTGOING; i++) {
@@ -711,6 +757,131 @@ int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable
     }
     routingTable[j].sockfd = -1; // inizializza il socket a -1
     routingTable[j].id = ntohs(header.id); // memorizza l'ID
+    return count; // ritorna il numero di peer attivi
+}
+
+
+int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable, int mySpeed, struct sockaddr_in bind_ip_port, int listenPort, char fs[NMAXFILE][MAXLEN]) {
+    QueryPayload queryPayload;
+    query_hit_payload queryHitPayload;
+    MessageHeader hitResponseHeader;
+
+    int j,k,s,count = 0;
+    if(header->type != TYPE_QUERY) {
+        printf("Ricevuto un messaggio non di tipo query.\n");
+        return -1; // non è una query
+    }
+
+    int index = ricercaDuplicato(routingTable, ntohs(header->id), sd);
+    if(index){
+        printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
+        return -1; // errore nella ricerca del duplicato
+    }
+    s = recv(sd, &queryPayload, sizeof(QueryPayload), 0);
+    if(s <1){
+        perror("Errore nella ricezione del payload della query");
+        return -1; // errore nella ricezione del payload della query
+    }
+    if(queryPayload.minimum_speed <= mySpeed) {
+        queryHitPayload.n_hits = 0;
+        queryHitPayload.port = listenPort;
+        queryHitPayload.speed = mySpeed;
+        strncpy(queryHitPayload.ip, inet_ntoa(bind_ip_port.sin_addr), MAXLEN);
+
+        //logica di ricerca dei file nel file system
+        for (int i = 0; i < NMAXFILE; i++) {
+            if (strlen(fs[i]) == 0) continue;
+            // confronto semplice: la query è contenuta nel nome del file
+            if (strstr(fs[i], queryPayload.query) != NULL) {//scorro il file system a trovare i file che contengono la query
+                strncpy(queryHitPayload.results[queryHitPayload.n_hits].name, fs[i], MAX_FILENAME); // copio il nome del file nel payload
+                queryHitPayload.results[queryHitPayload.n_hits].index = i;
+                queryHitPayload.n_hits++;
+                if (queryHitPayload.n_hits >= MAX_RESULTS){
+                    break; // raggiunto il numero massimo di risultati del payload dovra essere piu specifico il client
+                }
+            }
+        }
+
+        if (queryHitPayload.n_hits > 0) {
+            // Costruzione header risposta
+            hitResponseHeader.type = TYPE_QUERYHIT;
+            hitResponseHeader.ttl = htons(10); // Time To Live in network byte order
+            hitResponseHeader.payload_length = htons(sizeof(query_hit_payload)); // lunghezza del payload
+            hitResponseHeader.id = header->id;  // stesso ID della query ricevuta
+
+            // Invia prima l’header
+            if(send(sd, &hitResponseHeader, sizeof(MessageHeader), 0)< 0){
+                perror("Errore nell'invio dell'header di query hit");
+                return -1;
+            }
+
+            // Poi invia il payload
+            if(send(sd, &queryHitPayload, sizeof(query_hit_payload), 0) < 0) {
+                perror("Errore nell'invio del payload di query hit");
+                return -1;
+            }
+            printf("Risposta QUERY_HIT inviata con %d risultati.\n", queryHitPayload.n_hits);
+        }
+
+    }
+
+    for(k = 0; k < MAXMESSAGE; k++) {//messo qui perchè se la tabella di routing è piena non inoltro la query ma rispondo con un queryhit se la ho
+        if(routingTable[k].sockfd== 0) {
+            break; // trovo il primo slot libero nella tabella di routing
+        }
+    }
+    if(k == MAXMESSAGE) {
+        printf("Tabella di routing piena, impossibile rispondere al query.\n");
+        return -1; // tabella di routing piena
+    }
+
+    //controllo ttl
+    header->ttl = htons(ntohs(header->ttl) - 1); // decrement
+    if(ntohs(header->ttl) <= 0) {
+        printf("TTL scaduto per la query, non inoltro.\n");
+        return 0; // TTL scaduto, non inoltro
+    }
+
+    routingTable[index].sockfd = sd; // inizializza il socket a -1
+    routingTable[index].id = ntohs(header->id); // memorizza l'ID
+    printf("Inoltro della query a tutti i peer attivi.\n");
+    for(j = 0; j < MAXOUTGOING; j++) {
+        if(outgoing_peers[j].active) {
+            if(outgoing_peers[j].sd == sd) {
+                continue; // non inoltro a chi me lo ha inviato
+            }
+            if(send(outgoing_peers[j].sd, header, sizeof(MessageHeader), 0) < 0) {
+                perror("Errore nell'invio della query al peer in uscita");
+            } else { // andato a buon fine l'header
+                if(send(outgoing_peers[j].sd, &queryPayload, sizeof(QueryPayload), 0) < 0) {
+                    perror("Errore nell'invio del payload della query al peer in uscita");
+                } else {
+                    count++; // conta i peer attivi
+                }
+            }
+        }
+    }
+    for(j = 0; j < MAXINCOMING; j++) {
+        if(incoming_peers[j].active) {
+            if(incoming_peers[j].sd == sd) {
+                continue; // non inoltro a chi me lo ha inviato
+            }
+            if(send(incoming_peers[j].sd, header, sizeof(MessageHeader), 0) < 0) {
+                perror("Errore nell'invio della query al peer in arrivo");
+            } else { // andato a buon fine l'header
+                if(send(incoming_peers[j].sd, &queryPayload, sizeof(QueryPayload), 0) < 0) {
+                    perror("Errore nell'invio del payload della query al peer in arrivo");
+                } else {
+                    count++; // conta i peer attivi
+                }
+            }
+        }
+    }
+    if(count == 0) {
+        printf("Nessun peer attivo per la query.\n");
+        return 0; // nessun peer attivo
+    }
+
     return count; // ritorna il numero di peer attivi
 }
 
