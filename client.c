@@ -58,9 +58,15 @@ int main() {
     int scelta;
     int flag = 1;
     int n; //variabile per il numero di descrittori pronti
+    int p;
     RoutingEntry routingTable[MAXMESSAGE]; //tabella di routing per i messaggi
     srand(time(NULL)); // inizializza il generatore di numeri casuali UNA SOLA VOLTA
 
+    //inizializzo la tabella di routing
+    for(int i = 0; i < MAXMESSAGE; i++) {
+        routingTable[i].sockfd = 0; // inizializzo il socket a 0 (libero)
+        routingTable[i].id = 0; // inizializzo l'ID a 0
+    }
 
  	//parto con la listen
 	struct sockaddr_in bind_ip_port;
@@ -160,13 +166,16 @@ int main() {
                 switch (scelta) {
                     case 1: //fa il ping
                         printf("Eseguo ping...\n");
-                        /*if(outgoing_peers[0].active) {
-                            char ping_msg[] = "PING";
-                            send(outgoing_peers[0].sd, ping_msg, sizeof(ping_msg), 0);
-                            printf("Ping inviato al peer well known.\n");
+                        p=ping(outgoing_peers, incoming_peers, routingTable);
+                        if(p< 0) {
+                            printf("Errore nell'invio del ping.\n");
                         } else {
-                            printf("Peer well known non attivo.\n");
-                        }*/
+                            if (p==0){
+                                printf("Nessun peer attivo per il ping.\n");
+                            } else {
+                                printf("Ping inviato con successo a %d peer.\n", p);
+                            }
+                        }
                         break;
                     
                     case 2: //esegue una query
@@ -220,8 +229,8 @@ int main() {
                         break; // esce dal ciclo dopo aver accettato una connessione
                     }
                     if(i == MAXINCOMING-1) {//tutti gli slot sono occupati
-                     printf("Massimo numero di peer in arrivo raggiunto.\n");
-                }
+                        printf("Massimo numero di peer in arrivo raggiunto.\n");
+                    }
                 }
                 
             }
@@ -359,18 +368,25 @@ int ping(Peer* outgoing_peers, Peer*incoming_peers, RoutingEntry* routingTable) 
 
     for(i = 0; i < MAXOUTGOING; i++) {
         if(outgoing_peers[i].active) {
-            count++; // conta i peer attivi
-            // Preparo l'header del messaggio di ping
-            send(outgoing_peers[i].sd, &header, sizeof(header), 0); // invio il ping al peer
+            if(send(outgoing_peers[i].sd, &header, sizeof(header), 0) < 0) {// se non riesco a inviare il ping
+                perror("Errore nell'invio del ping al peer in uscita");
+            }
+            else{
+                count++; // conta i peer attivi
+            }
         }
     }
     for(i = 0; i < MAXINCOMING; i++) {
         if(incoming_peers[i].active) {
-            count++; // conta i peer attivi
-            send(incoming_peers[i].sd, &header, sizeof(header), 0); // invio il ping al peer
+            if(send(incoming_peers[i].sd, &header, sizeof(header), 0) < 0) {// se non riesco a inviare il ping
+                perror("\nErrore nell'invio del ping al peer in arrivo\n");
+            }
+            else{
+                count++; // conta i peer attivi
+            }
+            
         }
-    }
-    
+    }   
     if(count != 0) {           
         routingTable[j].sockfd = -1; // inizializza il socket a -1
         routingTable[j].id= ntohs(header.id); // memorizza l'ID del messaggio      
