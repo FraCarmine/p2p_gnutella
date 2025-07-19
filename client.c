@@ -312,7 +312,7 @@ int riceviMessaggio(int sd, MessageHeader* header) {
         return -1; // errore nella ricezione del messaggio
     }
 
-    return 0; // messaggio ricevuto con successo
+    return 1; // messaggio ricevuto con successo
     }
 
 
