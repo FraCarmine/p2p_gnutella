@@ -303,7 +303,7 @@ int main() {
                     }
                     else{
                         // Gestisco il messaggio ricevuto
-                        switch(header.type) {
+                        switch(ntohs(header.type)) {
                             case TYPE_PING:
                                 printf("Ricevuto ping da %s:%d\n", inet_ntoa(outgoing_peers[i].addr.sin_addr), ntohs(outgoing_peers[i].addr.sin_port));
                                 // Rispondo con un pong
@@ -356,7 +356,7 @@ int main() {
                     }
                     else{
                         // Gestisco il messaggio ricevuto
-                        switch(header.type) {
+                        switch(ntohs(header.type)) {
                             case TYPE_PING:
                                 printf("Ricevuto ping da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
                                 // Rispondo con un pong
@@ -432,7 +432,6 @@ int riceviMessaggio(int sd, MessageHeader* header) {
         perror("Errore nella ricezione del messaggio");
         return -1; // errore nella ricezione del messaggio
     }
-
     return 1; // messaggio ricevuto con successo
     }
 
@@ -575,7 +574,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
     MessageHeader responseHeader;
     PongPayload pongPayload;
     int j;
-    if(header->type != TYPE_PING) {
+    if(ntohs(header->type) != TYPE_PING) {
         return -1; // non è un ping
     }
     for(j = 0; j < MAXMESSAGE; j++) {
@@ -594,11 +593,11 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
 
 
     // Rispondo con un pong
-    responseHeader.type = TYPE_PONG;
+    responseHeader.type = htons(TYPE_PONG); // tipo di messaggio pong
     responseHeader.payload_length = htons(sizeof(PongPayload)); // lunghezza del payload
     responseHeader.ttl = htons(10); // Time To Live in network byte order
-    responseHeader.id = header->id; //rispondo con lo stesso ID del ping
-    pongPayload.port = peer_addr.sin_port; // mia porta di ascolto
+    responseHeader.id = header->id; //rispondo con lo stesso ID del ping gia in formato network byte order
+    pongPayload.port = peer_addr.sin_port; // mia porta di ascolto 
     strncpy(pongPayload.ip, LOCALHOST, MAXLEN); // indirizzo IP del peer perchè tanto è una demo basterebbe sostituire con l'ip reale della bind
 
     if(send(sd, &responseHeader, sizeof(responseHeader), 0)<0){
@@ -611,7 +610,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
     }
     // Aggiungo l'ID e il socket alla tabella di routing
     routingTable[j].sockfd = sd; // memorizzo il socket
-    routingTable[j].id = header->id; // memorizzo l'ID del messaggio
+    routingTable[j].id = ntohs(header->id); // memorizzo l'ID del messaggio
 
     //inoltro a tutti il ping
     header->ttl = htons(ntohs(header->ttl) - 1); // decremento il TTL
@@ -647,7 +646,7 @@ int ping(Peer* outgoing_peers, Peer*incoming_peers, RoutingEntry* routingTable) 
     // Funzione per inviare un ping a un peer
     int i,j,count = 0;
     MessageHeader header;
-    header.type = TYPE_PING;
+    header.type = htons(TYPE_PING);
     header.payload_length = htons(0); // nessun payload per il ping
     header.ttl = htons(10); // Time To Live in network byte order
     header.id = htons(rand()); // genera ID numerico random
@@ -727,7 +726,7 @@ int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable
     scanf("%s", queryPayload.query);
     while(getchar() !='\n'); // pulisco il buffer 
 
-    header.type = TYPE_QUERY;
+    header.type = htons(TYPE_QUERY);
     header.payload_length = htons(sizeof(QueryPayload)); // lunghezza del payload
     header.ttl = htons(10); // Time To Live in network byte order
     header.id = htons(rand()); // genera ID numerico random 
@@ -780,7 +779,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
     MessageHeader hitResponseHeader;
 
     int j,k,s,count = 0;
-    if(header->type != TYPE_QUERY) {
+    if(ntohs(header->type) != TYPE_QUERY) {
         printf("Ricevuto un messaggio non di tipo query.\n");
         return -1; // non è una query
     }
@@ -796,10 +795,10 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         return -1; // errore nella ricezione del payload della query
     }
     //ricerco in locale
-    if(queryPayload.minimum_speed <= mySpeed) {
-        queryHitPayload.n_hits = 0;
-        queryHitPayload.port = listenPort;
-        queryHitPayload.speed = mySpeed;
+    if(ntohs(queryPayload.minimum_speed) <= mySpeed) {
+        queryHitPayload.n_hits =0;
+        queryHitPayload.port = htons(listenPort);
+        queryHitPayload.speed = htons(mySpeed);
         strncpy(queryHitPayload.ip, inet_ntoa(bind_ip_port.sin_addr), MAXLEN);
 
         //logica di ricerca dei file nel file system
@@ -808,7 +807,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
             // confronto semplice: la query è contenuta nel nome del file
             if (strstr(fs[i], queryPayload.query) != NULL) {//scorro il file system a trovare i file che contengono la query
                 strncpy(queryHitPayload.results[queryHitPayload.n_hits].name, fs[i], MAX_FILENAME); // copio il nome del file nel payload
-                queryHitPayload.results[queryHitPayload.n_hits].index = i;
+                queryHitPayload.results[queryHitPayload.n_hits].index = htons(i);
                 queryHitPayload.n_hits++;
                 if (queryHitPayload.n_hits >= MAX_RESULTS){
                     break; // raggiunto il numero massimo di risultati del payload dovra essere piu specifico il client
@@ -818,10 +817,11 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
 
         if (queryHitPayload.n_hits > 0) {
             // Costruzione header risposta
-            hitResponseHeader.type = TYPE_QUERYHIT;
+            hitResponseHeader.type = htons(TYPE_QUERYHIT); // tipo di messaggio QUERY_HIT
             hitResponseHeader.ttl = htons(10); // Time To Live in network byte order
             hitResponseHeader.payload_length = htons(sizeof(query_hit_payload)); // lunghezza del payload
             hitResponseHeader.id = header->id;  // stesso ID della query ricevuta
+            queryHitPayload.n_hits = htons(queryHitPayload.n_hits); // converto il numero di risultati in network byte order
 
             // Invia prima l’header
             if(send(sd, &hitResponseHeader, sizeof(MessageHeader), 0)< 0){
@@ -906,7 +906,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     query_hit_payload queryHitPayload;
     int s;
 
-    if(header->type != TYPE_QUERYHIT) {
+    if(nths(header->type) != TYPE_QUERYHIT) {
         printf("Ricevuto un messaggio non di tipo QUERY_HIT.\n");
         return -1; // non è un QUERY_HIT
     }
@@ -925,7 +925,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     if(routingTable[s].sockfd == -1) {//sono io che ho fatto la query
         printf("Ricevuto QUERY_HIT per la mia query  da %s:%d\n", queryHitPayload.ip, ntohs(queryHitPayload.port));
         for(int i = 0; i < queryHitPayload.n_hits; i++) {
-            printf("Risultato %d: %s (indice: %d)\n", i + 1, queryHitPayload.results[i].name, queryHitPayload.results[i].index);
+            printf("Risultato %d: %s (indice: %d)\n", i + 1, queryHitPayload.results[i].name, ntohs(queryHitPayload.results[i].index));
         }
         return 0; // gestione del QUERY_HIT completata con successo
     }
