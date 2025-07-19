@@ -240,7 +240,7 @@ int main() {
                 }
                 
             }
-
+            //-------------------------------------------------RICEZIONE MESSAGGI-------------------------------------------------
             //controllo se ci sono peer in uscita pronti
             for(int i = 0; i < MAXOUTGOING; i++) {
                 if(outgoing_peers[i].active && FD_ISSET(outgoing_peers[i].sd, &temp)) {
@@ -286,9 +286,46 @@ int main() {
                 }
             }
             
-            //controllo se ci sono peer in arrivo pronti
+            //--------------------------------------DA INCOMING-------------------------------------------------
             for(int i = 0; i < MAXINCOMING; i++) {
                 if(incoming_peers[i].active && FD_ISSET(incoming_peers[i].sd, &temp)) {
+                    p= riceviMessaggio(incoming_peers[i].sd, &header);
+                    if(p == 0) {
+                        perror("Errore nella ricezione del messaggio dal peer in arrivo");
+                        close(incoming_peers[i].sd); // chiudo il socket del peer
+                        incoming_peers[i].active = 0; // segna il peer come non attivo
+                        FD_CLR(incoming_peers[i].sd, &readFDSET); // rimuovo il socket dal set di lettura
+                    }
+                    if(p < 0) {
+                        printf("Errore nella ricezione del messaggio dal peer in arrivo.\n");
+                        continue; // continua il ciclo se c'è un errore
+                    }
+                    else{
+                        // Gestisco il messaggio ricevuto
+                        switch(header.type) {
+                            case TYPE_PING:
+                                printf("Ricevuto ping da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
+                                // Rispondo con un pong
+                                if(rispondiPing(incoming_peers[i].sd, routingTable, &header, outgoing_peers, incoming_peers, bind_ip_port) < 0) {
+                                    perror("Errore nella risposta al ping");
+                                } else {
+                                    printf("Pong inviato con successo.\n");
+                                }
+                                break;
+                            case TYPE_PONG:
+                                printf("Ricevuto pong da %s:%d\n", inet_ntoa(incoming_peers[i].addr.sin_addr), ntohs(incoming_peers[i].addr.sin_port));
+                                handlePong(incoming_peers[i].sd, &header, routingTable);
+                                break;
+
+                            case TYPE_QUERY:
+                                //@todo
+                                break;
+                            
+                            case TYPE_QUERYHIT:
+                                //@todo
+                                break;
+                        }
+                    }
                     //@TODo: gestire i peer in arrivo
                 }
             }
