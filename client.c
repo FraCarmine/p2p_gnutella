@@ -17,8 +17,6 @@
 #define TYPE_QUERYHIT 4
 #define MAXMESSAGE 100
 
-//struttura pongPayload port int e string ip
-//str
 
 //#define  PORT 3333
 
@@ -33,6 +31,8 @@ typedef struct Peer {
     int active; // 0 = slot libero, 1 = usato
 } Peer;
 
+//----------------------------Struttura messaggi----------------------------------------------------------------------------------------------
+
 typedef struct MessageHeader {
     int type; // 1 per ping, 2 per query, 3 pong, 4 queryhit
     int id; // ID univoco numerico
@@ -45,10 +45,22 @@ typedef struct PongPayload {
     char ip[MAXLEN]; // indirizzo IP del peer
 } PongPayload;
 
+typedef struct QueryPayload{
+    int minimum_speed; // velocità minima richiesta
+    char query[MAXLEN]; // query da inviare
+} QueryPayload;
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------
 
 
 void die(char *);
 void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
+void chiudiConnessioni(Peer* incoming_peers, Peer* outgoing_peers);
+int riceviMessaggio(int sd, MessageHeader* header);
+int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET);
+int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable);
+int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, struct sockaddr_in peer_addr);
 
 
 
@@ -64,6 +76,7 @@ int main() {
     int flag = 1;
     int n; //variabile per il numero di descrittori pronti
     int p;
+    int mySpeed = 100; // variabile per la velocità 100kbps
     MessageHeader header; //header del messaggio
     RoutingEntry routingTable[MAXMESSAGE]; //tabella di routing per i messaggi
     srand(time(NULL)); // inizializza il generatore di numeri casuali UNA SOLA VOLTA
@@ -186,7 +199,16 @@ int main() {
                     
                     case 2: //esegue una query
                         printf("Eseguo query...\n");
-                        //@TODO: implementare la logica della query
+                        p=eseguiQuery(outgoing_peers, incoming_peers, routingTable, mySpeed);
+                        if(p < 0) {
+                            printf("Errore nell'invio della query.\n");
+                        } else {
+                            if(p == 0) {
+                                printf("Nessun peer attivo per la query.\n");
+                            } else {
+                                printf("Query inviata con successo a %d peer.\n", p);
+                            }
+                        }
                         break;
                     
                     case 3:     //aggiungi peer
@@ -251,6 +273,7 @@ int main() {
                         close(outgoing_peers[i].sd); // chiudo il socket del peer
                         outgoing_peers[i].active = 0; // segna il peer come non attivo
                         FD_CLR(outgoing_peers[i].sd, &readFDSET); // rimuovo il socket dal set di lettura
+                        continue;
                     } 
                     if(p < 0) {
                         printf("Errore nella ricezione del messaggio dal peer in uscita.\n");
@@ -295,6 +318,7 @@ int main() {
                         close(incoming_peers[i].sd); // chiudo il socket del peer
                         incoming_peers[i].active = 0; // segna il peer come non attivo
                         FD_CLR(incoming_peers[i].sd, &readFDSET); // rimuovo il socket dal set di lettura
+                        continue;
                     }
                     if(p < 0) {
                         printf("Errore nella ricezione del messaggio dal peer in arrivo.\n");
@@ -326,7 +350,6 @@ int main() {
                                 break;
                         }
                     }
-                    //@TODo: gestire i peer in arrivo
                 }
             }
             //menu utente testuale
@@ -336,6 +359,8 @@ int main() {
 }
 
 
+//-------------------------------------------------------Utilities------------------------------------------------------------
+ 
 int riceviMessaggio(int sd, MessageHeader* header) {
     // Funzione per ricevere un messaggio da un peer
     int s;
@@ -448,8 +473,12 @@ int ricercaDuplicato(RoutingEntry* routingTable, int id, int sockfd) {
             return i; // trovato duplicato
         }
     }
+    
     return 0; // nessun duplicato trovato
 }
+
+
+//-----------------------------PING-----------------------------------------------------------------------------------
 
 int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     PongPayload pongPayload;
@@ -606,9 +635,87 @@ int ping(Peer* outgoing_peers, Peer*incoming_peers, RoutingEntry* routingTable) 
 
 
 
+//----------------------------------------------------------QUERY------------------------------------------------------------
+
+int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable) {
+    // Funzione per inviare una query a un peer
+    int i, j, count = 0;
+    MessageHeader header;
+    QueryPayload queryPayload;
+
+
+    //ricerco uno slot libero nella tabella di routing
+    for(j = 0; j < MAXMESSAGE; j++) {
+        if(routingTable[j].sockfd == 0) { // se il socket è libero
+            break; // esce dal ciclo dopo aver trovato uno slot libero
+        }
+    }
+    if(j == MAXMESSAGE) {
+        printf("Tabella di routing piena, impossibile inviare query.\n");
+        return -1; // tabella di routing piena
+    }
+
+
+    // Chiede all'utente di inserire la velocità minima richiesta e il nome del file da cercare
+    printf("inserire velocità minima richiesta (in kbps): ");
+    scanf("%d", &queryPayload.minimum_speed);
+    while(getchar() !='\n'); // pulisco il buffer
+    if(queryPayload.minimum_speed < 0) {
+        printf("Velocità minima richiesta non valida.\n");
+        return -1; // velocità minima non valida
+    }
+
+    printf("inserire il nome del file cercato: ");
+    scanf("%s", queryPayload.query);
+    while(getchar() !='\n'); // pulisco il buffer 
+
+    header.type = TYPE_QUERY;
+    header.payload_length = htons(sizeof(QueryPayload)); // lunghezza del payload
+    header.ttl = htons(10); // Time To Live in network byte order
+    header.id = htons(rand()); // genera ID numerico random 
+
+    //inoltro la query a tutti i peer connessi a me
+    for(i = 0; i < MAXOUTGOING; i++) {
+        if(outgoing_peers[i].active) {
+            if(send(outgoing_peers[i].sd, &header, sizeof(header), 0) < 0) {
+                perror("Errore nell'invio della query al peer in uscita");
+            } else { // andato a buon fine l'header
+                if(send(outgoing_peers[i].sd, &queryPayload, sizeof(queryPayload), 0) < 0) {
+                    perror("Errore nell'invio del payload della query al peer in uscita");
+                }
+                else{//andato a buon fine il payload
+                    count++; // conta i peer attivi
+                }
+            }          
+        }
+    }
+    
+    for(i = 0; i < MAXINCOMING; i++) {
+        if(incoming_peers[i].active) {
+            if(send(incoming_peers[i].sd, &header, sizeof(header), 0) < 0) {
+                perror("Errore nell'invio della query al peer in arrivo");
+            } else { // andato a buon fine l'header
+                if(send(incoming_peers[i].sd, &queryPayload, sizeof(queryPayload), 0) < 0) {
+                    perror("Errore nell'invio del payload della query al peer in arrivo");
+                }
+                else{//andato a buon fine il payload
+                    count++; // conta i peer attivi
+                }
+            }
+            
+        }
+    }
+    if(count == 0){
+        printf("Nessun peer attivo per la query.\n");
+        return 0; // nessun peer attivo
+    }
+    routingTable[j].sockfd = -1; // inizializza il socket a -1
+    routingTable[j].id = ntohs(header.id); // memorizza l'ID
+    return count; // ritorna il numero di peer attivi
+}
+
 
 void die(char *error) {
-	
 	fprintf(stderr, "%s.\n", error);
 	exit(1);
 	
