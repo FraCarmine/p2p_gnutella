@@ -272,7 +272,7 @@ int main() {
                             }
                         }
                         for(int i = 0; i < MAXINCOMING; i++) {
-                            if(incoming_peers[i].active && ntohs(incoming_peers[i].addr.sin_port) == disconnectPort) {
+                            if(incoming_peers[i].active && ntohs(incoming_peers[i].addr.sin_port) == disconnectPort && intet_addr(LOCALHOST) == incoming_peers[i].addr.sin_addr.s_addr) {//espandibile con il controllo su indirizzo IP
                                 if(disconnectPeer(&incoming_peers[i], &readFDSET) < 0) {
                                     printf("Errore nella disconnessione del peer.\n");
                                 } else {
