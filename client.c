@@ -81,7 +81,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
 int ping(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable, int mySpeed, struct sockaddr_in bind_ip_port, int listenPort, char fs[NMAXFILE][MAXLEN]);
-int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable, struct sockaddr_in bind_ip_port, int listenPort, int mySpeed, char fs[NMAXFILE][MAXLEN]);
+int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable)
 int popolaFileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile);
 int disconnectPeer(Peer* peer,fd_set* readFDSET);
 
