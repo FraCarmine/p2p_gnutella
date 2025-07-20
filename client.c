@@ -200,9 +200,6 @@ int main() {
         n= select(maxfd+1, &temp, NULL, NULL, &time); //attendo eventi sui socket
         
         if(n>0){    //almeno un socket è pronto
-            printf("\n%d socket pronti\n", n);
-
-            
             if(FD_ISSET(STDIN_FILENO, &temp)){  //è Pronto lo stdin
                 scanf("%d", &scelta);
                 while(getchar() !='\n'); //pulisco il buffer
