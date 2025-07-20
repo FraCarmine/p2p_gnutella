@@ -18,7 +18,7 @@
 #define MAXMESSAGE 100
 #define MAX_FILENAME 128 // lunghezza massima del nome del file
 #define MAX_RESULTS 3 // numero massimo di risultati per query
-#define NMAXFILE 10 // numero massimo di file per peer
+#define NMAXFILE 4 // numero massimo di file per peer
 
 //#define  PORT 3333
 
@@ -75,11 +75,15 @@ void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
 void chiudiConnessioni(Peer* incoming_peers, Peer* outgoing_peers);
 int riceviMessaggio(int sd, MessageHeader* header);
 int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET);
+int ricercaDuplicato(RoutingEntry* routingTable, int id);
 int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable);
 int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, struct sockaddr_in peer_addr);
 int ping(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
-
+int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable, int mySpeed, struct sockaddr_in bind_ip_port, int listenPort, char fs[NMAXFILE][MAXLEN]);
+int handlequeryHit(int sd, MessageHeader* header, RoutingEntry* routingTable, struct sockaddr_in bind_ip_port, int listenPort, int mySpeed, char fs[NMAXFILE][MAXLEN]);
+int popolaFileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile);
+int disconnectPeer(Peer* peer,fd_set* readFDSET);
 
 int main() {
 	int listenSocket;//socket dal quale ascolto chi si vuole connettere con me
@@ -252,6 +256,35 @@ int main() {
                         chiudiConnessioni(incoming_peers, outgoing_peers);
                         close(listenSocket); //chiude il socket di ascolto
                         break;
+                    case 6: //disconnetti peer
+                        printf("Disconnetti peer...\n");
+                        int disconnectPort;
+                        //printf("inserire indirizzo IP del peer da disconnettere: ");
+                        //scanf("%s", ip); questo nel caso in cui avessi un client che non opera su localhost
+                        printf("inserisci la porta del peer da disconnettere: ");
+                        scanf("%d", &disconnectPort);
+                        while(getchar() !='\n'); // pulisco il buffer
+                        for(int i = 0; i < MAXOUTGOING; i++) {
+                            if(outgoing_peers[i].active && ntohs(outgoing_peers[i].addr.sin_port) == disconnectPort) {
+                                if(disconnectPeer(&outgoing_peers[i], &readFDSET) < 0) {
+                                    printf("Errore nella disconnessione del peer.\n");
+                                } else {
+                                    printf("Peer disconnesso con successo.\n\n\n");
+                                }
+                                break;
+                            }
+                        }
+                        for(int i = 0; i < MAXINCOMING; i++) {
+                            if(incoming_peers[i].active && ntohs(incoming_peers[i].addr.sin_port) == disconnectPort) {
+                                if(disconnectPeer(&incoming_peers[i], &readFDSET) < 0) {
+                                    printf("Errore nella disconnessione del peer.\n");
+                                } else {
+                                    printf("Peer disconnesso con successo.\n\n\n");
+                                }
+                                break;
+                            }
+                        }                    
+                        break;
                 }  
                 
 
@@ -399,6 +432,19 @@ int main() {
 
 //-------------------------------------------------------Utilities------------------------------------------------------------
  
+int disconnectPeer(Peer* peer,fd_set* readFDSET) {
+    // Funzione per disconnettere un peer
+    if(peer->active) {
+        close(peer->sd);
+        peer->active = 0; // segna il peer come non attivo
+        printf("Connessione con peer %s:%d chiusa.\n", inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port));
+        FD_CLR(peer->sd, readFDSET); // rimuovo il socket dal set di lettura
+        peer->sd = -1; // resetto il socket a -1 (libero
+        return 0; // ritorna 0 se tutto va bene
+    }
+    return -1; // ritorna -1 se il peer non è attivo
+}
+
 int popolaFileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile) {
     // Funzione per popolare il file system con i file di esempio
     int len;
@@ -531,7 +577,7 @@ int ricercaDuplicato(RoutingEntry* routingTable, int id) {
             return i; // trovato duplicato
         }
     }  
-    return 0; // nessun duplicato trovato
+    return -1; // nessun duplicato trovato
 }
 
 
@@ -541,7 +587,7 @@ int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable) {
     PongPayload pongPayload;
     int index = ricercaDuplicato(routingTable, ntohs(header->id));
     if(index < 0) {
-        printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
+        printf("Errore nella ricerca nella tabella di routing.\n");
         return -1; // errore nella ricerca del duplicato
     }
 
@@ -573,7 +619,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
     // Funzione per rispondere a un ping
     MessageHeader responseHeader;
     PongPayload pongPayload;
-    int j;
+    int j=0;
     if(ntohs(header->type) != TYPE_PING) {
         return -1; // non è un ping
     }
@@ -586,7 +632,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
         printf("Tabella di routing piena, impossibile rispondere al ping.\n");
         return -1; // tabella di routing piena
     }
-    if(ricercaDuplicato(routingTable, ntohs(header->id))>0) {
+    if(ricercaDuplicato(routingTable, ntohs(header->id))>=0) {
         printf("Trovato duplicato nella tabella di routing, non rispondo al ping.\n");
         return -1; // trovato duplicato
     }
@@ -785,7 +831,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
     }
 
     int index = ricercaDuplicato(routingTable, ntohs(header->id));
-    if(index){
+    if(index >= 0) {
         printf("Errore nella ricerca del duplicato nella tabella di routing.\n");
         return -1; // errore nella ricerca del duplicato
     }
@@ -834,7 +880,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
                 perror("Errore nell'invio del payload di query hit");
                 return -1;
             }
-            printf("Risposta QUERY_HIT inviata con %d risultati.\n", queryHitPayload.n_hits);
+            printf("Risposta QUERY_HIT inviata con %d risultati.\n", ntohs(queryHitPayload.n_hits));
         }
 
     }
