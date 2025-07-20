@@ -81,7 +81,7 @@ int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Pee
 int ping(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 int query(Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable);
 int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, RoutingEntry* routingTable, int mySpeed, struct sockaddr_in bind_ip_port, int listenPort, char fs[NMAXFILE][MAXLEN]);
-int handlequeryHit(int sd, MessageHeader* header, RoutingEntry* routingTable, struct sockaddr_in bind_ip_port, int listenPort, int mySpeed, char fs[NMAXFILE][MAXLEN]);
+int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable, struct sockaddr_in bind_ip_port, int listenPort, int mySpeed, char fs[NMAXFILE][MAXLEN]);
 int popolaFileSystem(char fs[NMAXFILE][MAXLEN], int nmaxfile);
 int disconnectPeer(Peer* peer,fd_set* readFDSET);
 
@@ -190,7 +190,7 @@ int main() {
     }
     
     //menu utente testuale
-    printf("\n\nMenu:\n 1. Esegui un ping \n  2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
+    printf("\n\nMenu:\n 1. Esegui un ping \n  2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n 6. disconnetti peer\n");
 
 
 
@@ -251,7 +251,7 @@ int main() {
                         break;
                     
                     case 5: //esci
-                        printf("Uscita dal server...\n");
+                        printf("Uscita dal client...\n");
                         flag = 0; //esce dal ciclo principale
                         chiudiConnessioni(incoming_peers, outgoing_peers);
                         close(listenSocket); //chiude il socket di ascolto
@@ -287,7 +287,8 @@ int main() {
                         break;
                 }  
                 
-
+                //menu utente testuale
+                printf("\n\nMenu:\n 1. Esegui un ping \n 2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n 6. disconnetti peer\n");
             }
             if(!flag){
                 break; //esce dal ciclo principale se l'utente ha scelto di uscire
@@ -423,8 +424,7 @@ int main() {
                     }
                 }
             }
-            //menu utente testuale
-            printf("\n\nMenu:\n 1. Esegui un ping \n 2. esegui una query \n 3. aggiungi peer \n 4. listPeer \n 5. esci\n");
+            
         }
     }
 }
