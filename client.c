@@ -262,7 +262,7 @@ int main() {
                         scanf("%d", &disconnectPort);
                         while(getchar() !='\n'); // pulisco il buffer
                         for(int i = 0; i < MAXOUTGOING; i++) {
-                            if(outgoing_peers[i].active && ntohs(outgoing_peers[i].addr.sin_port) == disconnectPort) {
+                            if(outgoing_peers[i].active && ntohs(outgoing_peers[i].addr.sin_port) == disconnectPort && inet_addr(LOCALHOST) == incoming_peers[i].addr.sin_addr.s_addr) {
                                 if(disconnectPeer(&outgoing_peers[i], &readFDSET) < 0) {
                                     printf("Errore nella disconnessione del peer.\n");
                                 } else {
@@ -899,8 +899,7 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         return 0; // TTL scaduto, non inoltro
     }
 
-    routingTable[k].sockfd = sd; // segno quale socket ha inviato la query
-    routingTable[k].id = ntohs(header->id); // memorizza l'ID
+
     printf("Inoltro della query a tutti i peer attivi.\n");
     for(j = 0; j < MAXOUTGOING; j++) {
         if(outgoing_peers[j].active) {
@@ -938,6 +937,8 @@ int handleQuery(int sd, MessageHeader* header, Peer* outgoing_peers, Peer* incom
         printf("Nessun peer attivo per la query.\n");
         return 0; // nessun peer attivo
     }
+    routingTable[k].sockfd = sd; // segno quale socket ha inviato la query
+    routingTable[k].id = ntohs(header->id); // memorizza l'ID
 
     return count; // ritorna il numero di peer attivi
 }
@@ -983,7 +984,7 @@ int handleQueryHit(int sd, MessageHeader* header, RoutingEntry* routingTable) {
         perror("Errore nell'invio del payload di QUERY_HIT al peer");
         return -1; // errore nell'invio del payload di QUERY_HIT
     }    
-    printf("inoltrara query hit \n");
+    printf("inoltrata query hit \n");
     return 0; // gestione del QUERY_HIT completata con successo
 }
 
