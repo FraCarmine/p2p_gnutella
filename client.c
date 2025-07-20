@@ -74,7 +74,7 @@ void die(char *);
 void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers);
 void chiudiConnessioni(Peer* incoming_peers, Peer* outgoing_peers);
 int riceviMessaggio(int sd, MessageHeader* header);
-int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET);
+int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET, int listenPort);
 int ricercaDuplicato(RoutingEntry* routingTable, int id);
 int handlePong(int sd, MessageHeader* header, RoutingEntry* routingTable);
 int rispondiPing (int sd, RoutingEntry* routingTable, MessageHeader* header, Peer* outgoing_peers, Peer* incoming_peers, struct sockaddr_in peer_addr);
@@ -185,7 +185,7 @@ int main() {
     // Ciclo principale del server
     //
     printf("inserire well konwn peer\n");
-    if(connectToPeer(LOCALHOST,  outgoing_peers, &maxfd, &readFDSET) < 0) {
+    if(connectToPeer(LOCALHOST,  outgoing_peers, &maxfd, &readFDSET, listenPort) < 0) {
         printf("Errore nella connessione al peer well known");
     }
     
@@ -235,7 +235,7 @@ int main() {
                     
                     case 3:     //aggiungi peer
                         printf("Aggiungi peer...\n");
-                        if(connectToPeer(LOCALHOST, outgoing_peers, &maxfd, &readFDSET)<0) {
+                        if(connectToPeer(LOCALHOST, outgoing_peers, &maxfd, &readFDSET, listenPort)<0) {
                             printf("Errore nella connessione al peer.\n");
                         } else {
                             printf("Connessione al peer aggiunto con successo.\n");
@@ -517,14 +517,14 @@ void stampaPeer(Peer* incoming_peers, Peer* outgoing_peers) {
 
 
 
-int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET) {
+int connectToPeer(char *ip, Peer* outgoing_peers, int* maxfd, fd_set* readFDSET, int listenPort) {
     int port, i;
     struct sockaddr_in peer_addr;
     // Chiede all'utente di inserire la porta del peer
     printf("inserire porta del peer\n");
     scanf("%d", &port);
     while(getchar() !='\n'); // pulisco il buffer
-    while(port < 1024 || port > 65535) {
+    while(port < 1024 || port > 65535 || port == listenPort) { // verifica che la porta sia valida e non sia la stessa della porta di ascolto
         printf("Porta non valida. Deve essere compresa tra 1024 e 65535.\n");
         printf("inserire porta del peer\n");
         scanf("%d", &port);
